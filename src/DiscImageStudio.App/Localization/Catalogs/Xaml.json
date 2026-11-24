@@ -1826,6 +1826,24 @@
     "es": "Ajustar a la ventana (o doble clic en un espacio vacío)",
     "cs": "Přizpůsobit oknu (nebo dvojklik na prázdné místo)"
   },
+  "Xaml.ShowFinalDiscOnCanvas": {
+    "zh-CN": "在画布上显示成品盘面",
+    "en": "Show final disc on canvas",
+    "zh-TW": "在畫布上顯示成品碟面",
+    "ja": "キャンバスに完成ディスクを表示",
+    "tr": "Son diski tuvalde göster",
+    "es": "Mostrar el disco final en el lienzo",
+    "cs": "Zobrazit výsledný disk na plátně"
+  },
+  "Xaml.ShowFinalDiscOnCanvasHint": {
+    "zh-CN": "以影调预览替换图层原图，显示生成与刻录将写入的盘面；图层仍可选择和编辑。",
+    "en": "Replace the layer pictures with the tone preview of what generation and burning write. Layers stay selectable and editable.",
+    "zh-TW": "以影調預覽取代圖層原圖，顯示產生與燒錄將寫入的碟面；圖層仍可選取與編輯。",
+    "ja": "レイヤーの元画像を、生成と書き込みで記録される内容のトーン プレビューに置き換えます。レイヤーは引き続き選択・編集できます。",
+    "tr": "Katman görsellerini, oluşturma ve yazmanın diske yazacağı içeriğin ton önizlemesiyle değiştirir. Katmanlar seçilebilir ve düzenlenebilir kalır.",
+    "es": "Sustituye las imágenes de las capas por la vista previa de tono de lo que escriben la generación y la grabación. Las capas siguen siendo seleccionables y editables.",
+    "cs": "Nahradí obrázky vrstev náhledem tónu toho, co zapíše generování a vypalování. Vrstvy lze dál vybírat a upravovat."
+  },
   "Xaml.Properties": {
     "zh-CN": "属性",
     "en": "Properties",

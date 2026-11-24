@@ -78,6 +78,7 @@ public partial class DesignViewModel : ObservableObject
                 layer.IsVisible = !layer.IsVisible;
             }
         });
+        ToggleDiscPreviewOnCanvasCommand = new RelayCommand(() => IsDiscPreviewOnCanvas = !IsDiscPreviewOnCanvas);
         Layers.CollectionChanged += Layers_CollectionChanged;
         Tone = new ToneViewModel(shell, state, this);
         RefreshDataRegionText();
@@ -147,6 +148,16 @@ public partial class DesignViewModel : ObservableObject
     public RelayCommand RemoveSelectedCommand { get; }
 
     public RelayCommand<DesignLayerViewModel> ToggleVisibilityCommand { get; }
+
+    /// <summary>When set, the canvas shows the tone module's disc projection (the material
+    /// that generation and burning write) in place of the raw layer pictures, while the
+    /// layers stay selectable and editable on top of it.</summary>
+    [ObservableProperty]
+    private bool _isDiscPreviewOnCanvas;
+
+    public RelayCommand ToggleDiscPreviewOnCanvasCommand { get; }
+
+    partial void OnIsDiscPreviewOnCanvasChanged(bool value) => CanvasChanged?.Invoke();
 
     /// <summary>Set by the shell when a project opens; the composite's target State path and
     /// the canvas mapping depend on the family.</summary>

@@ -21,8 +21,11 @@ namespace DiscImageStudio.ViewModels;
 public partial class ToneViewModel : ObservableObject
 {
     private const int TonePreviewSize = 512;
+    // The DVD projection also fills the design canvas, so it renders at the composite's
+    // resolution with enough samples per sector to keep the dither pattern readable.
+    private const int DvdTonePreviewSize = 2048;
     private const int TonePreviewSamplesPerSector = 32;
-    private const int TonePreviewDvdSamplesPerSector = 8;
+    private const int TonePreviewDvdSamplesPerSector = 16;
 
     private readonly ShellViewModel _shell;
     private readonly DiscParametersState _state;
@@ -33,6 +36,7 @@ public partial class ToneViewModel : ObservableObject
     private CancellationTokenSource? _tonePreviewCancellation;
     private int _tonePreviewRevision;
     private string? _compositePath;
+    private long _compositeSourceRevision = -1;
     private string? _lastTonePreviewPath;
     private bool _tonePreviewReady;
     private bool _windowClosed;
@@ -70,6 +74,17 @@ public partial class ToneViewModel : ObservableObject
 
     [ObservableProperty]
     private BitmapSource? _tonePreviewImage;
+
+    /// <summary>Half the bitmap's side in disc millimetres, centred on the disc: the canvas
+    /// draws the projection over the same coordinates as the layers.</summary>
+    [ObservableProperty]
+    private double _tonePreviewHalfExtentMm;
+
+    /// <summary>The design composite revision the current projection was rendered from. When
+    /// it differs from <see cref="DesignViewModel.CompositeRevision"/>, layer edits are not in
+    /// the picture yet.</summary>
+    [ObservableProperty]
+    private long _tonePreviewCompositeRevision = -1;
 
     [ObservableProperty]
     private bool _hasTonePreview;
@@ -190,6 +205,7 @@ public partial class ToneViewModel : ObservableObject
     private void Design_CompositeRendered(string? compositePath)
     {
         _compositePath = compositePath;
+        _compositeSourceRevision = _design.CompositeRevision;
         RefreshTonePreviewCommand.NotifyCanExecuteChanged();
         if (compositePath is null)
         {
@@ -275,6 +291,7 @@ public partial class ToneViewModel : ObservableObject
             return;
         }
 
+        long compositeRevision = _compositeSourceRevision;
         string? outputPath = null;
         bool keepOutput = false;
         bool enteredGate = false;
@@ -290,6 +307,7 @@ public partial class ToneViewModel : ObservableObject
 
             int samplesPerSector;
             bool hasFileRegionOverlay;
+            double halfExtentMm;
             if (IsBluRay)
             {
                 BluRayDiscParameters parameters = ReadBluRayPreviewParameters();
@@ -300,6 +318,7 @@ public partial class ToneViewModel : ObservableObject
                 bool filesAtOuterRing = dataDirectory.Length > 0 && _state.BdFilesAtOuterRing;
                 hasFileRegionOverlay = dataDirectory.Length > 0;
                 samplesPerSector = 0;
+                halfExtentMm = parameters.OutputOuterRadiusMm;
                 await StaWorker.RunAsync(() =>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -335,6 +354,9 @@ public partial class ToneViewModel : ObservableObject
                 bool filesAtOuterRing = _state.DvdFilesAtOuterRing;
                 hasFileRegionOverlay = dataDirectory.Length > 0;
                 samplesPerSector = TonePreviewDvdSamplesPerSector;
+                // The DVD renderer maps the outer radius to the outermost pixel centres
+                // ((size - 1) / 2 from the middle), so the bitmap edges lie half a pixel beyond.
+                halfExtentMm = options.OutputOuterRadiusMm * DvdTonePreviewSize / (DvdTonePreviewSize - 1.0);
                 await StaWorker.RunAsync(() =>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -347,7 +369,7 @@ public partial class ToneViewModel : ObservableObject
                         sourcePath,
                         outputPath,
                         options,
-                        TonePreviewSize,
+                        DvdTonePreviewSize,
                         samplesPerSector,
                         cancellationToken,
                         drawingStartLba: plan?.DrawingStartLba ?? 0,
@@ -366,6 +388,7 @@ public partial class ToneViewModel : ObservableObject
                 CdDiscParameters display = parameters with { ImageOuterRadiusMm = parameters.OutputOuterRadiusMm };
                 ToneProfile tone = _state.Tone;
                 samplesPerSector = TonePreviewSamplesPerSector;
+                halfExtentMm = display.PreviewImageOuterRadiusMm;
                 string dataDirectory = _state.CdDataDirectory.Trim();
                 string volumeLabel = dataDirectory.Length > 0
                     ? _state.ResolveVolumeLabel(OpticalDiscFamily.CompactDisc)
@@ -418,6 +441,10 @@ public partial class ToneViewModel : ObservableObject
             string? previousPath = _lastTonePreviewPath;
             _lastTonePreviewPath = outputPath;
             keepOutput = true;
+            // Placement first: the canvas repaints when the image changes and must read the
+            // extent and source revision that belong to it.
+            TonePreviewHalfExtentMm = halfExtentMm;
+            TonePreviewCompositeRevision = compositeRevision;
             TonePreviewImage = bitmap;
             HasTonePreview = true;
             HasFileRegionOverlay = hasFileRegionOverlay;

@@ -128,6 +128,7 @@ public class DiscDesignCanvas : FrameworkElement
 
         _design = design;
         design.CanvasChanged += InvalidateVisual;
+        design.Tone.PropertyChanged += OnTonePropertyChanged;
         _collectionHandler = (_, args) =>
         {
             InvalidateVisual();
@@ -161,6 +162,7 @@ public class DiscDesignCanvas : FrameworkElement
         if (_design is not null)
         {
             _design.CanvasChanged -= InvalidateVisual;
+            _design.Tone.PropertyChanged -= OnTonePropertyChanged;
             if (_collectionHandler is not null)
             {
                 _design.Layers.CollectionChanged -= _collectionHandler;
@@ -178,6 +180,14 @@ public class DiscDesignCanvas : FrameworkElement
 
     private void OnLayerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         => InvalidateVisual();
+
+    private void OnTonePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ToneViewModel.TonePreviewImage))
+        {
+            InvalidateVisual();
+        }
+    }
 
     // ---- Coordinate mapping ----
 
@@ -296,11 +306,19 @@ public class DiscDesignCanvas : FrameworkElement
         DiscRenderCore.DrawGuideCircles(drawingContext, center, discRadius, outerRadius, innerRadius);
         DiscRenderCore.DrawOriginCross(drawingContext, center, 5);
 
-        // Bottom-up: the layer list stores the panel order with index 0 on top, so painting
-        // walks it backwards to match what the exporter composites and the hit test selects.
-        for (int index = _design.Layers.Count - 1; index >= 0; index--)
+        if (ShowsDiscPreview)
         {
-            DrawLayer(drawingContext, _design.Layers[index]);
+            DrawDiscPreview(drawingContext, center);
+            DrawLayersOverDiscPreview(drawingContext);
+        }
+        else
+        {
+            // Bottom-up: the layer list stores the panel order with index 0 on top, so painting
+            // walks it backwards to match what the exporter composites and the hit test selects.
+            for (int index = _design.Layers.Count - 1; index >= 0; index--)
+            {
+                DrawLayer(drawingContext, _design.Layers[index]);
+            }
         }
 
         DrawDimMask(drawingContext, center, outerRadius, innerRadius);
@@ -372,6 +390,48 @@ public class DiscDesignCanvas : FrameworkElement
                 .Select(corner => ScreenFromMm(corner.X, corner.Y))
                 .ToArray();
             context.DrawGeometry(null, placeholderPen, PolygonGeometry(corners));
+        }
+    }
+
+    /// <summary>The disc projection replaces the layer pictures only once it exists; until the
+    /// first render (or after a failed one) the raw layers keep the canvas usable.</summary>
+    private bool ShowsDiscPreview => _design is { IsDiscPreviewOnCanvas: true } design
+        && design.Tone.TonePreviewImage is not null
+        && design.Tone.TonePreviewHalfExtentMm > 0;
+
+    /// <summary>True while layer edits are newer than the composite the projection came from.</summary>
+    private bool IsDiscPreviewBehindDesign => _design is { } design
+        && design.Tone.TonePreviewCompositeRevision != design.CompositeRevision;
+
+    private void DrawDiscPreview(DrawingContext context, Point center)
+    {
+        ToneViewModel tone = _design!.Tone;
+        double halfExtent = ScreenLength(tone.TonePreviewHalfExtentMm);
+        Rect bounds = new(center.X - halfExtent, center.Y - halfExtent, 2 * halfExtent, 2 * halfExtent);
+        context.DrawImage(tone.TonePreviewImage, bounds);
+    }
+
+    /// <summary>Over the projection, layers draw only what the projection cannot show: hidden
+    /// layers keep their dashed outline, and while the projection is catching up with an edit
+    /// the selected layer shows its raw picture translucently, so dragging gives immediate
+    /// feedback.</summary>
+    private void DrawLayersOverDiscPreview(DrawingContext context)
+    {
+        const double PendingEditOpacity = 0.6;
+        bool previewBehind = IsDiscPreviewBehindDesign;
+        for (int index = _design!.Layers.Count - 1; index >= 0; index--)
+        {
+            DesignLayerViewModel layer = _design.Layers[index];
+            if (!layer.IsVisible)
+            {
+                DrawLayer(context, layer);
+            }
+            else if (previewBehind && ReferenceEquals(layer, _design.SelectedLayer))
+            {
+                context.PushOpacity(PendingEditOpacity);
+                DrawLayer(context, layer);
+                context.Pop();
+            }
         }
     }
 

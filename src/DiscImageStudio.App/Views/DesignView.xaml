@@ -380,6 +380,26 @@
                                     <iconPacks:PackIconLucide Kind="RefreshCcw" Width="14" Height="14"
                                                               Foreground="{DynamicResource TextSecondaryBrush}" />
                                 </Button>
+                                <Border Width="1" Height="16" Margin="3,0" VerticalAlignment="Center"
+                                        Background="{DynamicResource DividerBrush}" />
+                                <!-- Swaps the raw layer pictures for the tone module's disc projection;
+                                     the accent colour marks the active state. -->
+                                <Button Style="{StaticResource IconButton}" Command="{Binding ToggleDiscPreviewOnCanvasCommand}"
+                                        AutomationProperties.Name="{loc:Text Xaml.ShowFinalDiscOnCanvas}"
+                                        ToolTip="{loc:Text Xaml.ShowFinalDiscOnCanvasHint}">
+                                    <iconPacks:PackIconLucide Kind="Disc3" Width="14" Height="14">
+                                        <iconPacks:PackIconLucide.Style>
+                                            <Style TargetType="iconPacks:PackIconLucide">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsDiscPreviewOnCanvas}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </iconPacks:PackIconLucide.Style>
+                                    </iconPacks:PackIconLucide>
+                                </Button>
                             </StackPanel>
                         </Border>
                     </Grid>

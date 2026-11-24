@@ -20,13 +20,14 @@ internal static class TonePreviewTests
 {
     private const int Sectors = 4096;
     private const int Size = 512;
+    private const int DvdPreviewSize = 2048;
 
     internal static void Run()
     {
         var directory = Directory.CreateTempSubdirectory("tone-preview-ui-");
         try { WpfTestHost.Run(() => Wait(CheckAsync(directory.FullName))); }
         finally { directory.Delete(recursive: true); }
-        Console.WriteLine("tone-preview: passed (CD/DVD/BD 512px masks, exact inner/outer file regions, automatic refresh, source isolation, stale-result clearing and offscreen panel)");
+        Console.WriteLine("tone-preview: passed (CD/BD 512px and DVD 2048px masks, canvas placement, exact inner/outer file regions, automatic refresh, source isolation, stale-result clearing and offscreen panel)");
     }
 
     private static async Task CheckAsync(string directory)
@@ -60,6 +61,11 @@ internal static class TonePreviewTests
                 ToneViewModel tone = shell.Design.Tone;
                 await Until(() => tone.IsTonePreviewReady && tone.TonePreviewImage is not null, tone, "initial " + familyName);
                 CheckImage(tone.TonePreviewImage!, family, 24, 58, null, familyName + " no files");
+                CheckCanvasPlacement(tone, shell.Design, family, 58, familyName);
+                if (family == OpticalDiscFamily.Dvd)
+                {
+                    CheckCanvasDrawsDiscPreview(shell.Design, tone);
+                }
                 Snapshot(tone, familyName + "-no-files");
                 string composite = SourcePath(shell.State, family);
                 byte[] originalComposite = SHA256.HashData(File.ReadAllBytes(composite));
@@ -139,21 +145,126 @@ internal static class TonePreviewTests
         return (bd.DrawingStartRadiusMm, bd.DrawingEndRadiusMm);
     }
 
+    private static int ExpectedSize(OpticalDiscFamily family)
+    {
+        if (family == OpticalDiscFamily.Dvd)
+        {
+            return DvdPreviewSize;
+        }
+
+        return Size;
+    }
+
+    /// <summary>The design canvas draws the projection over the layers' millimetre space, so
+    /// the published extent must match each renderer's pixel mapping and the projection must
+    /// name the composite revision it shows.</summary>
+    private static void CheckCanvasPlacement(ToneViewModel tone, DesignViewModel design,
+        OpticalDiscFamily family, double outer, string name)
+    {
+        int size = ExpectedSize(family);
+        double expected = outer;
+        if (family == OpticalDiscFamily.Dvd)
+        {
+            expected = outer * size / (size - 1.0);
+        }
+
+        Require(Math.Abs(tone.TonePreviewHalfExtentMm - expected) < 1e-9,
+            name + $": canvas extent {tone.TonePreviewHalfExtentMm} mm matches the renderer mapping {expected} mm");
+        Require(tone.TonePreviewCompositeRevision == design.CompositeRevision,
+            name + ": the projection records the composite revision it was rendered from");
+    }
+
+    /// <summary>With the toggle on, the canvas paints the projection over exactly the published
+    /// extent; with it off, the raw layers stay. A solid marker image stands in for the
+    /// projection so the check is independent of tone and sampling.</summary>
+    private static void CheckCanvasDrawsDiscPreview(DesignViewModel design, ToneViewModel tone)
+    {
+        const int CanvasSize = 700;
+        BitmapSource rendered = tone.TonePreviewImage!;
+        DesignLayerViewModel? selected = design.SelectedLayer;
+        double scale = CanvasSize / (2 * (DesignViewModel.DiscRadiusMm + 3.0));
+        double insideMm = 50;
+        double outsideMm = tone.TonePreviewHalfExtentMm + 1.0;
+        design.SelectedLayer = null;
+        var canvas = new DiscDesignCanvas { DataContext = design };
+        canvas.Measure(new Size(CanvasSize, CanvasSize));
+        canvas.Arrange(new Rect(0, 0, CanvasSize, CanvasSize));
+        canvas.UpdateLayout();
+        UiLayoutSnapshot.Save(canvas, "design-canvas-layers");
+        design.IsDiscPreviewOnCanvas = true;
+        canvas.UpdateLayout();
+        UiLayoutSnapshot.Save(canvas, "design-canvas-disc-preview");
+        design.IsDiscPreviewOnCanvas = false;
+        tone.TonePreviewImage = SolidImage(Colors.Red);
+        try
+        {
+            design.IsDiscPreviewOnCanvas = false;
+            Require(!IsRed(CanvasPixel(canvas, CanvasSize, insideMm * scale)),
+                "the canvas shows the raw layers while the disc preview is off");
+
+            design.IsDiscPreviewOnCanvas = true;
+            Require(IsRed(CanvasPixel(canvas, CanvasSize, insideMm * scale)),
+                "the canvas shows the disc projection inside its extent while the toggle is on");
+            Require(!IsRed(CanvasPixel(canvas, CanvasSize, outsideMm * scale)),
+                "the disc projection ends at its published extent");
+        }
+        finally
+        {
+            design.IsDiscPreviewOnCanvas = false;
+            design.SelectedLayer = selected;
+            tone.TonePreviewImage = rendered;
+        }
+    }
+
+    private static BitmapSource SolidImage(Color color)
+    {
+        const int Side = 16;
+        byte[] pixels = new byte[Side * Side * 4];
+        for (int offset = 0; offset < pixels.Length; offset += 4)
+        {
+            pixels[offset] = color.B;
+            pixels[offset + 1] = color.G;
+            pixels[offset + 2] = color.R;
+            pixels[offset + 3] = color.A;
+        }
+
+        BitmapSource bitmap = BitmapSource.Create(Side, Side, 96, 96, PixelFormats.Bgra32, null, pixels, Side * 4);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    /// <summary>One canvas pixel on the horizontal axis, <paramref name="offsetPx"/> right of the disc centre.</summary>
+    private static byte[] CanvasPixel(DiscDesignCanvas canvas, int canvasSize, double offsetPx)
+    {
+        // InvalidateVisual only re-runs OnRender on the next layout pass.
+        canvas.UpdateLayout();
+        var target = new RenderTargetBitmap(canvasSize, canvasSize, 96, 96, PixelFormats.Pbgra32);
+        target.Render(canvas);
+        byte[] pixel = new byte[4];
+        int x = (int)Math.Round(canvasSize / 2.0 + offsetPx);
+        target.CopyPixels(new Int32Rect(x, canvasSize / 2, 1, 1), pixel, 4, 0);
+        return pixel;
+    }
+
+    private static bool IsRed(byte[] bgra) => bgra[2] > 200 && bgra[1] < 60 && bgra[0] < 60;
+
     private static void CheckImage(BitmapSource bitmap, OpticalDiscFamily family, double inner, double outer,
         (double Inner, double Outer)? drawing, string name)
     {
-        Require(bitmap.PixelWidth == Size && bitmap.PixelHeight == Size, name + ": all media use 512 by 512 pixels");
+        int size = ExpectedSize(family);
+        Require(bitmap.PixelWidth == size && bitmap.PixelHeight == size,
+            name + $": the preview uses {size} by {size} pixels");
         BitmapSource converted = new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
-        byte[] pixels = new byte[Size * Size * 4];
-        converted.CopyPixels(pixels, Size * 4, 0);
+        byte[] pixels = new byte[size * size * 4];
+        converted.CopyPixels(pixels, size * 4, 0);
         bool cd = family == OpticalDiscFamily.CompactDisc;
-        double centre = cd ? Size / 2.0 : (Size - 1) / 2.0;
-        double mmPerPixel = outer * 2 / (family == OpticalDiscFamily.Dvd ? Size - 1 : Size);
+        double centre = cd ? size / 2.0 : (size - 1) / 2.0;
+        double mmPerPixel = outer * 2 / (family == OpticalDiscFamily.Dvd ? size - 1 : size);
         int wrongMask = 0, wrongFiles = 0, blue = 0, opaqueDrawing = 0;
-        for (int y = 0; y < Size; y++)
-        for (int x = 0; x < Size; x++)
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
         {
-            int offset = (y * Size + x) * 4;
+            int offset = (y * size + x) * 4;
             double dx = (x - centre) * mmPerPixel, dy = (y - centre) * mmPerPixel;
             double radius = Math.Sqrt(dx * dx + dy * dy);
             bool isBlue = pixels[offset] == 0xFF && pixels[offset + 1] == 0x85 && pixels[offset + 2] == 0x33 && pixels[offset + 3] == 0xFF;
@@ -171,7 +282,7 @@ internal static class TonePreviewTests
             if (radius > inner + mmPerPixel && radius < outer - mmPerPixel && !isBlue && pixels[offset + 3] == 255)
                 opaqueDrawing++;
         }
-        Require(wrongMask == 0 && pixels[(256 * Size + 256) * 4 + 3] == 0,
+        Require(wrongMask == 0 && pixels[((size / 2) * size + size / 2) * 4 + 3] == 0,
             name + ": the centre and outside the recording annulus are transparent");
         Require(wrongFiles == 0 && (drawing is null ? blue == 0 : blue > 0),
             name + $": blue pixels match the filesystem plan, including both ends (mismatches {wrongFiles}, blue {blue})");
